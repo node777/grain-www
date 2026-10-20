@@ -1,0 +1,241 @@
+# The development system: virtio drivers, a service that crashes on its
+# first run (to exercise restarts), two tasks that use them, a registry of
+# protocol descriptors, a key-value store, Envoy (through which an AI agent
+# operates the system with leased, limited authority), the content store,
+# identity and Ledger, the desktop, and the network.
+#
+# Steward builds exactly this at boot; the build refuses it if the wiring is
+# wrong. See docs/BRIX.md for the language.
+
+name = grain-dev
+halt_when_tasks_finish
+
+# Every domain here may write `@grain` records.
+template dev {
+    debug_console
+}
+
+# Small services: they answer quickly and rarely.
+template light like dev {
+    hart = 1
+    budget = 500us
+}
+
+template driver like dev {
+    priority = 200
+    budget = 1ms
+    period = 10ms
+}
+
+domain console like driver {
+    program = virtio_console
+    restart = on_fault
+    device port { virtio = 3 }
+    provides console { protocol = console.v1 }
+    # What the owner types: only the store (the passphrase) and consent (the
+    # owner's answers to the agent's asks) read it.
+    provides input { protocol = input.v1 }
+}
+
+domain rng like driver {
+    program = virtio_rng
+    device source { virtio = 4 }
+    provides entropy { protocol = entropy.v1 }
+}
+
+# Crashes on its first run; Steward rebuilds it.
+domain flaky like dev {
+    program = flaky
+    priority = 150
+    restart = on_fault
+    provides echo { protocol = echo.v1 }
+}
+
+domain hello like dev {
+    program = hello
+    kind = task
+    # One greeting, then it exits: half a driver's share is plenty.
+    budget = 500us
+    uses console { from = console.console, protocol = console.v1 }
+    uses entropy { from = rng.entropy, protocol = entropy.v1 }
+}
+
+domain registry like light {
+    program = registry
+    priority = 180
+    provides registry { protocol = registry.v1 }
+}
+
+domain store like light {
+    program = kv
+    priority = 160
+    provides kv { protocol = kv.v1 }
+}
+
+# Envoy runs as a task: the session ends when the agent says bye. Its port is
+# the second virtio console; without one (no agent attached) it is skipped.
+domain envoy like dev {
+    program = envoy
+    kind = task
+    priority = 120
+    hart = 1
+    budget = 2ms
+    memory = 128KiB
+    stack = 128KiB
+    device port { virtio = 3, instance = 1, optional }
+    uses registry { from = registry.registry, protocol = registry.v1 }
+    uses ledger { from = ledger.ledger, protocol = ledger.v1 }
+    uses kumara { from = kumara.kumara, protocol = kumara.v1 }
+}
+
+# Puts the agent's asks to the owner on the console and reads the answer.
+# Without a console it is skipped, and every ask is refused.
+domain consent like dev {
+    program = consent
+    priority = 100
+    # It polls a few times a second and otherwise sleeps.
+    budget = 200us
+    period = 10ms
+    uses console { from = console.console, protocol = console.v1 }
+    uses input { from = console.input, protocol = input.v1 }
+}
+
+# The content store. It drives its disk itself; without a disk it is skipped.
+# The owner types the passphrase on the console.
+domain tablecloth like dev {
+    program = tablecloth
+    priority = 110
+    hart = 1
+    budget = 2ms
+    memory = 4MiB
+    stack = 128KiB
+    await_ready
+    # virtio-blk, or an NVMe drive: a disk is a disk.
+    device disk { virtio = 2, pci = nvme, optional }
+    uses console { from = console.console, protocol = console.v1 }
+    uses input { from = console.input, protocol = input.v1 }
+    uses entropy { from = rng.entropy, protocol = entropy.v1 }
+    provides tablecloth { protocol = tablecloth.v1 }
+}
+
+# This instance's identity; it keeps its seed sealed in the store.
+domain kumara like light {
+    program = kumara
+    priority = 140
+    stack = 64KiB
+    await_ready
+    uses tablecloth { from = tablecloth.tablecloth, protocol = tablecloth.v1 }
+    uses entropy { from = rng.entropy, protocol = entropy.v1 }
+    provides kumara { protocol = kumara.v1 }
+    # What booted, signed: an agent or a peer can check it.
+    provides attest { protocol = attest.v1 }
+}
+
+# The signed, append-only record of authority events.
+domain ledger like light {
+    program = ledger
+    priority = 130
+    stack = 64KiB
+    await_ready
+    uses tablecloth { from = tablecloth.tablecloth, protocol = tablecloth.v1 }
+    uses kumara { from = kumara.kumara, protocol = kumara.v1 }
+    provides ledger { protocol = ledger.v1 }
+}
+
+# The desktop: Surf drives the screen, keyboard and pointer, and paints
+# every window from typed strokes. Without a screen it is skipped.
+domain surf like dev {
+    program = surf
+    priority = 190
+    budget = 4ms
+    period = 10ms
+    memory = 16MiB
+    stack = 64KiB
+    # virtio-gpu, or a Bochs display on PCI.
+    device screen { virtio = 16, pci = display, optional }
+    # Input, from whichever the machine has: virtio keyboard and tablet,
+    # or USB through an xHCI controller.
+    device keys { virtio = 18, extra }
+    device pointer { virtio = 18, instance = 1, extra }
+    device usb { pci = xhci, extra }
+    provides surf { protocol = surf.v1 }
+    # What is on the screen, read back as data.
+    provides scene { protocol = scene.v1 }
+}
+
+# The first application: a shell the owner opens from the dock.
+domain shell like light {
+    program = shell
+    priority = 100
+    stack = 32KiB
+    uses surf { from = surf.surf, protocol = surf.v1 }
+    uses kumara { from = kumara.kumara, protocol = kumara.v1 }
+    uses tablecloth { from = tablecloth.tablecloth, protocol = tablecloth.v1 }
+    uses ledger { from = ledger.ledger, protocol = ledger.v1 }
+    uses kv { from = store.kv, protocol = kv.v1 }
+}
+
+# The network below Comlink: the network device, and datagrams between
+# instances on the link. Without a network device it is skipped.
+domain mycelium like driver {
+    program = mycelium
+    hart = 1
+    memory = 512KiB
+    stack = 32KiB
+    # virtio-net, or an Intel 8254x Ethernet card.
+    device nic { virtio = 1, pci = ethernet, optional }
+    provides mycelium { protocol = mycelium.v1 }
+}
+
+# Other instances, by identity: sessions with them over Mycelium, and
+# capabilities shared both ways. It may share the services it uses (here,
+# the guestbook) and the store's public objects; each share is a lease.
+domain comlink like dev {
+    program = comlink
+    priority = 125
+    hart = 1
+    memory = 512KiB
+    stack = 64KiB
+    uses mycelium { from = mycelium.mycelium, protocol = mycelium.v1 }
+    uses kumara { from = kumara.kumara, protocol = kumara.v1 }
+    uses entropy { from = rng.entropy, protocol = entropy.v1 }
+    uses ledger { from = ledger.ledger, protocol = ledger.v1 }
+    uses tablecloth { from = tablecloth.tablecloth, protocol = tablecloth.v1 }
+    uses guestbook { from = guestbook.guestbook, protocol = guestbook.v1 }
+    provides comlink { protocol = comlink.v1 }
+}
+
+# The first hosted application: whoever the owner shares it with can sign.
+domain guestbook like light {
+    program = guestbook
+    priority = 120
+    memory = 64KiB
+    provides guestbook { protocol = guestbook.v1 }
+}
+
+domain checker like dev {
+    program = checker
+    kind = task
+    uses echo { from = flaky.echo, protocol = echo.v1 }
+    uses console { from = console.console, protocol = console.v1 }
+}
+
+# The agent holds these leases from boot, and may ask for the askable ones
+# once each; the owner answers each ask. It never holds anything else.
+agent {
+    envoy = envoy
+    # Every askable service is put to the owner first (domain consent).
+    owner = consent
+    grant echo { from = flaky.echo, protocol = echo.v1, duration = 15s }
+    grant store { from = store.kv, protocol = kv.v1 }
+    grant console { from = console.console, protocol = console.v1, uses = 20 }
+    askable entropy { from = rng.entropy, protocol = entropy.v1, uses = 2 }
+    # Upgrading or rolling back the system is the owner's call to grant.
+    askable tablecloth { from = tablecloth.tablecloth, protocol = tablecloth.v1 }
+    # The agent sees the screen as the owner does, as data.
+    grant scene { from = surf.scene, protocol = scene.v1 }
+    # What booted, signed by this instance (measured boot).
+    grant attest { from = kumara.attest, protocol = attest.v1 }
+    # Meeting other instances and lending them things is the owner's call.
+    askable comlink { from = comlink.comlink, protocol = comlink.v1 }
+}

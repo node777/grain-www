@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Grain OS in a browser</title>
+<meta name="description" content="Caravan and Grain running in this tab, on an emulated RISC-V machine compiled to WebAssembly.">
+<link rel="stylesheet" href="style.css">
+<script type="module" src="app.js"></script>
+</head>
+<body>
+<header>
+  <div class="title">
+    <h1>Grain OS</h1>
+    <p>running in this tab: an emulated RISC-V machine (grain-emu, compiled to WebAssembly) boots Caravan and Grain. Nothing leaves your browser.</p>
+  </div>
+  <form id="setup" class="setup">
+    <label>Setup <select id="config"></select></label>
+    <label>Harts <select id="harts"><option>1</option><option selected>2</option><option>4</option></select></label>
+    <button id="boot" type="submit">Boot</button>
+    <button id="stop" type="button" disabled>Power off</button>
+    <button id="forget" type="button" title="Delete this setup's disk from this browser: a new identity and passphrase next boot">Forget disk</button>
+  </form>
+  <p id="about" class="about"></p>
+  <p id="status" class="status" role="status">Not running.</p>
+</header>
+
+<main>
+  <section id="desktop-panel" class="panel wide" hidden>
+    <h2>Desktop <span class="hint">the screen, keyboard and tablet (virtio-gpu and virtio-input): click the screen to type into it; click elsewhere to stop</span></h2>
+    <div class="screen-box"><canvas id="screen" width="1024" height="768" tabindex="0" aria-label="The desktop"></canvas></div>
+  </section>
+
+  <section id="console-panel" class="panel">
+    <h2>Console <span class="hint">what the system says to you; the passphrase and your answers to the agent's asks go here</span></h2>
+    <pre id="console-out" class="out" aria-live="polite"></pre>
+    <form id="console-form" class="line">
+      <input id="console-in" type="password" autocomplete="off" spellcheck="false" placeholder="type, then Enter" aria-label="Console input">
+      <label class="show"><input id="console-show" type="checkbox"> show</label>
+    </form>
+  </section>
+
+  <section id="shell-panel" class="panel">
+    <h2>grainsh <span class="hint">the structured shell, through Envoy: try <code>help</code>, <code>caps</code>, <code>call store.put key=1 value=2</code>, <code>log</code></span></h2>
+    <pre id="shell-out" class="out" aria-live="polite"></pre>
+    <form id="shell-form" class="line">
+      <span class="prompt">grain&gt;</span>
+      <input id="shell-in" autocomplete="off" spellcheck="false" aria-label="grainsh command">
+    </form>
+  </section>
+
+  <section id="log-panel" class="panel wide">
+    <h2>System log <span class="hint">the serial console: <code>@caravan</code> from the kernel, <code>@grain</code> from user space</span>
+      <label class="show"><input id="log-records" type="checkbox"> records only</label></h2>
+    <pre id="log-out" class="out log"></pre>
+  </section>
+
+  <details id="manifest-panel" class="panel wide">
+    <summary>The manifest of this setup</summary>
+    <pre id="manifest" class="out"></pre>
+  </details>
+</main>
+
+<footer>
+  <p>The disk of a setup is kept in this browser's storage between visits; "Forget disk" deletes it. Source and documentation: the <code>grain-os</code> repository (<code>emu/</code> is the machine, <code>web/</code> this page).</p>
+</footer>
+</body>
+</html>

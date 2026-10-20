@@ -1,0 +1,22 @@
+# Failure handling: `crasher` faults on every start. Steward restarts it
+# twice, then stops it and revokes its service; `waiter`, blocked calling
+# that service, must get an error instead of hanging.
+
+name = grain-faults
+halt_when_tasks_finish
+
+domain crasher {
+    program = crasher
+    priority = 150
+    restart = on_fault
+    max_restarts = 2
+    debug_console
+    provides echo { protocol = echo.v1 }
+}
+
+domain waiter {
+    program = waiter
+    kind = task
+    debug_console
+    uses service { from = crasher.echo, protocol = echo.v1 }
+}

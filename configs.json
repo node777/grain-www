@@ -1,0 +1,32 @@
+[
+  {
+    "id": "dev",
+    "name": "The dev system",
+    "about": "Steward builds the system from its manifest: drivers, a key-value store, the content store on a disk (encrypted under a passphrase you choose), an identity, the Ledger, and Envoy, through which grainsh (or an AI agent) acts with leased, limited authority. The desktop opens the shell from its dock. On first boot, choose a passphrase in the Console. The system powers off when its tasks finish: grainsh's “bye” ends the session.",
+    "image": "images/dev.elf",
+    "manifest": "manifests/dev.brix",
+    "harts": 2,
+    "ram_mib": 256,
+    "devices": ["screen", "keyboard", "tablet", "rng", "disk", "console", "envoy"],
+    "disk": { "name": "dev", "mib": 64 }
+  },
+  {
+    "id": "ktest",
+    "name": "The kernel test suite",
+    "about": "The kernel alone, with its test program as the root task: capabilities, revocation, IPC, leases, scheduling budgets, faults, interrupts, and (with two harts or more) work across harts. It powers off with a summary.",
+    "image": "images/ktest.elf",
+    "harts": 2,
+    "ram_mib": 128,
+    "devices": []
+  },
+  {
+    "id": "faults",
+    "name": "Failure handling",
+    "about": "A domain that faults on every start: Steward restarts it twice, then stops it and revokes its service, and the domain that was calling it gets an error instead of hanging.",
+    "image": "images/faults.elf",
+    "manifest": "manifests/faults.brix",
+    "harts": 2,
+    "ram_mib": 128,
+    "devices": []
+  }
+]
