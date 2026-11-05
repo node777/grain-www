@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Grain OS in a browser</title>
+<meta name="description" content="Caravan and Grain running in this tab, on an emulated RISC-V machine compiled to WebAssembly.">
+<link rel="stylesheet" href="style.css">
+<script type="module" src="app.js"></script>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><span class="mark" aria-hidden="true"></span><h1>Grain OS</h1></div>
+  <form id="setup" class="setup">
+    <label><span class="lbl">Setup</span> <select id="config"></select></label>
+    <label><span class="lbl">Harts</span> <select id="harts"><option>1</option><option selected>2</option><option>4</option></select></label>
+    <button id="boot" type="submit">Boot</button>
+    <button id="stop" type="button" disabled>Power off</button>
+  </form>
+  <p id="status" class="status" role="status">Not running.</p>
+  <div class="tools">
+    <button id="type-text" type="button" title="Type text into the desktop, as keystrokes" hidden>Type text</button>
+    <button id="fullscreen" type="button" title="Show the desktop full screen (Esc leaves)" hidden>Full screen</button>
+    <button id="open-settings" type="button" title="Page settings: screen size, scaling, theme, disks">Settings</button>
+  </div>
+</header>
+
+<main class="workspace">
+  <section id="stage" class="stage" aria-label="The machine">
+    <div id="screen-box" class="screen-box" hidden>
+      <canvas id="screen" width="1024" height="768" tabindex="0" aria-label="The desktop: click to type into it"></canvas>
+    </div>
+    <div id="no-screen" class="no-screen">
+      <p id="about" class="about"></p>
+      <p class="hint">This setup has no screen: its output is in the system log.</p>
+    </div>
+  </section>
+
+  <aside id="drawer" class="drawer">
+    <nav class="tabs" role="tablist">
+      <button role="tab" data-tab="console" id="tab-console">Console<span class="dot" hidden></span></button>
+      <button role="tab" data-tab="shell" id="tab-shell">grainsh</button>
+      <button role="tab" data-tab="agent" id="tab-agent">Agent</button>
+      <button role="tab" data-tab="log" id="tab-log">Log</button>
+      <button role="tab" data-tab="manifest" id="tab-manifest">Manifest</button>
+    </nav>
+
+    <section id="console-panel" class="panel" role="tabpanel" data-panel="console">
+      <p class="hint">What the system says to you. The passphrase and your answers to the agent's asks go here.</p>
+      <pre id="console-out" class="out" aria-live="polite"></pre>
+      <form id="console-form" class="line">
+        <input id="console-in" type="password" autocomplete="off" spellcheck="false" placeholder="type, then Enter" aria-label="Console input">
+        <label class="show"><input id="console-show" type="checkbox"> show</label>
+      </form>
+    </section>
+
+    <section id="shell-panel" class="panel" role="tabpanel" data-panel="shell" hidden>
+      <p class="hint">The structured shell, through Envoy: try <code>help</code>, <code>caps</code>, <code>call store.put key=1 value=2</code>, <code>log</code>.</p>
+      <pre id="shell-out" class="out" aria-live="polite"></pre>
+      <form id="shell-form" class="line">
+        <span class="prompt">grain&gt;</span>
+        <input id="shell-in" autocomplete="off" spellcheck="false" aria-label="grainsh command">
+      </form>
+    </section>
+
+    <section id="agent-panel" class="panel" role="tabpanel" data-panel="agent" hidden>
+      <p class="hint">Claude, acting on the system through Envoy with the authority the manifest leases it; asks are answered in the Console.</p>
+      <form id="agent-settings" class="agent-settings">
+        <label>API key <input id="agent-key" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-…" aria-label="Anthropic API key"></label>
+        <label class="show"><input id="agent-remember" type="checkbox"> remember on this device</label>
+        <label>Model <select id="agent-model"></select></label>
+        <button id="agent-clear" type="button">New conversation</button>
+      </form>
+      <p class="hint agent-note">Messages go from this browser to <code>api.anthropic.com</code> with your key and are billed to your account; nothing else leaves the page. The key stays in this tab unless "remember" is ticked (then in this browser's storage for this site).</p>
+      <div id="agent-out" class="out chat" aria-live="polite"></div>
+      <form id="agent-form" class="line">
+        <textarea id="agent-in" rows="2" spellcheck="true" placeholder="Ask the agent to do something: “what can you do here?”, “store 42 under key 7”, “what is on the screen?”" aria-label="Message to the agent"></textarea>
+        <button id="agent-send" type="submit">Send</button>
+      </form>
+    </section>
+
+    <section id="log-panel" class="panel" role="tabpanel" data-panel="log" hidden>
+      <p class="hint">The serial console: <code>@caravan</code> from the kernel, <code>@grain</code> from user space.
+        <label class="show"><input id="log-records" type="checkbox"> records only</label></p>
+      <pre id="log-out" class="out log"></pre>
+    </section>
+
+    <section id="manifest-panel" class="panel" role="tabpanel" data-panel="manifest" hidden>
+      <p class="hint">The manifest of this setup, in Brix: what Steward builds.</p>
+      <pre id="manifest" class="out"></pre>
+    </section>
+  </aside>
+</main>
+
+<dialog id="settings">
+  <form method="dialog" class="settings">
+    <h2>Settings</h2>
+    <fieldset>
+      <legend>Desktop</legend>
+      <label>Screen size <select id="set-size">
+        <option value="1024x768">1024 × 768</option>
+        <option value="1280x800">1280 × 800</option>
+        <option value="1440x900">1440 × 900</option>
+        <option value="1920x1080">1920 × 1080</option>
+      </select></label>
+      <label>Scaling <select id="set-scale">
+        <option value="fit">fit the window</option>
+        <option value="actual">actual pixels</option>
+      </select></label>
+      <p class="hint">The screen size applies at the next boot.</p>
+    </fieldset>
+    <fieldset>
+      <legend>Page</legend>
+      <label>Theme <select id="set-theme">
+        <option value="system">as the system</option>
+        <option value="light">light</option>
+        <option value="dark">dark</option>
+      </select></label>
+    </fieldset>
+    <fieldset>
+      <legend>Disk of this setup</legend>
+      <p class="hint" id="disk-about">This setup has no disk.</p>
+      <div class="row">
+        <button id="disk-export" type="button">Export image</button>
+        <button id="disk-import" type="button">Import image…</button>
+        <button id="forget" type="button" class="danger">Forget disk</button>
+        <input id="disk-file" type="file" accept=".img,application/octet-stream" hidden>
+      </div>
+      <p class="hint">An exported image is the raw disk: QEMU and <code>grain-disk</code> read it too. Power off first.</p>
+    </fieldset>
+    <div class="row end"><button value="close" class="primary">Done</button></div>
+  </form>
+</dialog>
+</body>
+</html>
